@@ -28,10 +28,19 @@ jobs:
 
       - name: Find changed .cu files
         id: changed
-        run: |
-          git fetch origin ${{ github.base_ref }}
-          CHANGED=$(git diff --name-only FETCH_HEAD...HEAD | grep '\.cu$' || true)
-          echo "files=$CHANGED" >> $GITHUB_OUTPUT
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const files = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            const cuFiles = files.data
+              .map(f => f.filename)
+              .filter(f => f.endsWith('.cu'))
+              .join(' ');
+            core.setOutput('files', cuFiles);
 
       - name: Run gpuopt on changed kernels
         id: analysis
