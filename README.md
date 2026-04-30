@@ -278,6 +278,15 @@ c_flat[15] = 386
 opengpu-lab/rtl/tb_matmul.v:89: $finish called at 205 (1s)
 ```
 
+## RTL Validation
+
+```text
+[✓] Reset clears output: PASS
+[✓] Done asserted on cycle 17 (bound=66): PASS
+```
+
+These checks prove the FSM correctly zeroes output when reset is asserted at the signal level. They also prove `done` fires within the expected clock-cycle bound for a 4x4 matrix.
+
 ## Project layout
 
 ```text
