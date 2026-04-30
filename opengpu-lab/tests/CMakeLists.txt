@@ -43,6 +43,13 @@ target_link_libraries(test_profiler PRIVATE
 )
 add_test(NAME test_profiler COMMAND test_profiler)
 
+add_executable(test_compiler test_compiler.cpp)
+target_link_libraries(test_compiler PRIVATE
+  compiler
+  profiler
+)
+add_test(NAME test_compiler COMMAND test_compiler)
+
 add_executable(test_golden test_golden.cpp)
 target_include_directories(test_golden PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../backends/cpu/kernels

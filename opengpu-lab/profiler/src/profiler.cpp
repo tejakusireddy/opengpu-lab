@@ -13,7 +13,7 @@ namespace opengpu::profiler {
 
 void Profiler::record(const Metrics& metrics) { metrics_.push_back(metrics); }
 
-void Profiler::report() const {
+void Profiler::report(const bool compiler_coalesced) const {
   std::cout << "=== Performance Report ===\n";
   std::cout << std::left << std::setw(12) << "Backend" << std::setw(14) << "Latency(ms)"
             << std::setw(22) << "Throughput(ops/s)" << std::setw(12) << "Occupancy"
@@ -69,6 +69,13 @@ void Profiler::report() const {
                 << cuda_speedup << "x)\n";
       printed_any_insight = true;
     }
+  }
+
+  if (!compiler_coalesced) {
+    std::cout << "[!] Compiler analysis: memory access pattern is not coalesced\n";
+    std::cout << "    -> Apply loop tiling with tile_size multiple of 32\n";
+    std::cout << "    -> Estimated gain: 20-30% memory bandwidth improvement\n";
+    printed_any_insight = true;
   }
 
   if (!printed_any_insight) {

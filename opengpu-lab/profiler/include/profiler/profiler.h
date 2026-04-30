@@ -32,11 +32,11 @@ class Profiler {
 
   /**
    * @brief Prints performance report and optimization insights.
-   * @param None.
+   * @param compiler_coalesced True if compiler analysis reports coalesced memory access.
    * @return None.
    * @sideeffects Writes formatted report and insights to stdout.
    */
-  void report() const;
+  void report(bool compiler_coalesced) const;
 
  private:
   std::vector<Metrics> metrics_;

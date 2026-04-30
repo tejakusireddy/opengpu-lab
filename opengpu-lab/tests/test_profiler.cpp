@@ -134,7 +134,7 @@ int main() {
       sched.stall_fraction, sched.memory_coalesced, sched.low_occupancy, sched.high_stall});
 
   std::cout << std::fixed << std::setprecision(3);
-  profiler.report();
+  profiler.report(true);
   if (!sched.low_occupancy && sched.memory_coalesced && !sched.high_stall) {
     std::cerr << "Expected at least one scheduler-driven insight trigger\n";
     return EXIT_FAILURE;
