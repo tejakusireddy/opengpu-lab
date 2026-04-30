@@ -5,6 +5,19 @@
 ![Verilog](https://img.shields.io/badge/RTL-Verilog-orange)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
+## Quick Start
+```bash
+git clone https://github.com/tejakusireddy/opengpu-lab
+cd opengpu-lab
+make analyze KERNEL=backends/cuda/kernels/matmul.cu
+```
+
+```bash
+make analyze KERNEL=your_kernel.cu   # analyze any CUDA file
+make fix KERNEL=your_kernel.cu       # detect + auto-fix
+make benchmark                        # CPU vs CUDA vs RTL performance
+```
+
 > Run the same workload on CPU, CUDA, and RTL — then see exactly where your GPU performance is being wasted.
 
 OpenGPU Lab is an open-source GPU systems lab for understanding and optimizing how workloads move from software runtime to hardware execution.
