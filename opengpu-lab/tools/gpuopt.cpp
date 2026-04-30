@@ -75,6 +75,7 @@ int main(const int argc, const char** argv) {
   std::cout << "=== Memory Access Analysis ===\n";
   int issue_count = 0;
   int fixable_count = 0;
+  std::string first_strided_symbol;
   for (const opengpu::compiler::Op& op : analyzed.ops) {
     if (op.type != opengpu::compiler::OpType::GLOBAL_LOAD &&
         op.type != opengpu::compiler::OpType::GLOBAL_STORE) {
@@ -82,6 +83,9 @@ int main(const int argc, const char** argv) {
     }
     const std::string symbol = op.src0.empty() ? op.dst : op.src0;
     if (op.access_pattern == opengpu::compiler::MemAccessPattern::STRIDED) {
+      if (first_strided_symbol.empty()) {
+        first_strided_symbol = symbol;
+      }
       std::cout << "[!] " << symbol << " -> " << pattern_name(op.access_pattern) << " (stride="
                 << op.stride << ") — non-coalesced column access\n";
       ++issue_count;
@@ -108,7 +112,7 @@ int main(const int argc, const char** argv) {
 
   std::cout << "=== Optimization Insights ===\n";
   if (issue_count > 0) {
-    std::cout << "[!] STRIDED access detected on b_device\n";
+    std::cout << "[!] STRIDED access detected on " << first_strided_symbol << '\n';
     std::cout << "    -> Apply shared memory staging to fix\n";
     std::cout << "    -> Run with --fix to auto-apply\n";
   } else {
@@ -129,7 +133,7 @@ int main(const int argc, const char** argv) {
     const bool new_memory_bound = new_intensity <= ridge_point;
 
     std::cout << "\n=== Auto-Fix Applied ===\n";
-    std::cout << "[✓] b_device: STRIDED -> COALESCED via shared memory staging\n";
+    std::cout << "[✓] " << first_strided_symbol << ": STRIDED -> COALESCED via shared memory staging\n";
     std::cout << "[✓] New arithmetic intensity: " << new_intensity << " FLOPS/byte\n";
     std::cout << "[✓] Classification: " << (new_memory_bound ? "MEMORY BOUND" : "COMPUTE BOUND")
               << " (was " << (memory_bound ? "MEMORY BOUND" : "COMPUTE BOUND") << ")\n";
