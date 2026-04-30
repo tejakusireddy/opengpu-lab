@@ -78,6 +78,21 @@ Analyzing: backends/cuda/kernels/matmul.cu  (n=64)
 [!] b_device -> STRIDED (stride=64) — non-coalesced column access
 [✓] c -> COALESCED (stride=1)
 
+=== Warp Divergence Analysis ===
+[✓] No warp divergence detected
+
+=== Bank Conflict Analysis ===
+[✓] No bank conflicts detected
+
+=== Occupancy Tuning ===
+Detected block size  : 256
+Estimated occupancy  : 25.0% (256/1024)
+Multiple of 32       : yes
+[!] Low occupancy detected (< 50%)
+    -> Current: 256 threads/block
+    -> Suggested: 512 threads/block
+    -> Doubling block size may improve SM utilization
+
 === Roofline Analysis ===
 Arithmetic Intensity : 10.67 FLOPS/byte
 Ridge Point          : 11.11 FLOPS/byte
@@ -86,7 +101,8 @@ Classification       : MEMORY BOUND
 === Optimization Insights ===
 [!] STRIDED access detected on b_device
     -> Apply shared memory staging to fix
-    -> Run with --fix to auto-apply
+ 
+    -> Run with --fix to auto-apply all fixes
 
 === Summary ===
 Issues found : 1

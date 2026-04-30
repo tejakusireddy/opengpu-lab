@@ -7,7 +7,7 @@
 N ?= 64
 KERNEL ?= backends/cuda/kernels/matmul.cu
 
-.PHONY: analyze fix benchmark analyze-url fix-url build clean
+.PHONY: analyze fix benchmark analyze-url fix-url cost cost-url build clean
 
 build:
 	@if [ ! -f "./build/tools/gpuopt" ]; then \
@@ -41,6 +41,23 @@ fix-url: build
 	@echo "Downloading kernel from $(URL)..."
 	@curl -s -L -o /tmp/gpuopt_kernel.cu "$(URL)"
 	@./build/tools/gpuopt --kernel /tmp/gpuopt_kernel.cu --n $(N) --fix
+	@rm -f /tmp/gpuopt_kernel.cu
+
+cost: build
+	@if [ -z "$(KERNEL)" ]; then \
+		echo "Usage: make cost KERNEL=path/to/kernel.cu [GPU=a100] [HOURS=720] [N=64]"; \
+		exit 1; \
+	fi
+	@./build/tools/gpuopt --kernel $(KERNEL) --n $(N) --cost --gpu $(or $(GPU),a100) --hours $(or $(HOURS),720)
+
+cost-url: build
+	@if [ -z "$(URL)" ]; then \
+		echo "Usage: make cost-url URL=https://...kernel.cu [GPU=a100] [HOURS=720] [N=64]"; \
+		exit 1; \
+	fi
+	@echo "Downloading kernel from $(URL)..."
+	@curl -s -L -o /tmp/gpuopt_kernel.cu "$(URL)"
+	@./build/tools/gpuopt --kernel /tmp/gpuopt_kernel.cu --n $(N) --cost --gpu $(or $(GPU),a100) --hours $(or $(HOURS),720)
 	@rm -f /tmp/gpuopt_kernel.cu
 
 benchmark:

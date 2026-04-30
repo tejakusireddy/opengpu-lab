@@ -5,11 +5,14 @@
 // last modified: 2026-04-30
 
 #include "compiler/passes.h"
+#include "backends/cuda/cuda_backend.h"
 
+#include <chrono>
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace {
@@ -36,7 +39,7 @@ const char* pattern_name(const opengpu::compiler::MemAccessPattern pattern) {
 }
 
 void print_usage() {
-  std::cerr << "usage: gpuopt --kernel <path> --n <matrix_size> [--fix]\n";
+  std::cerr << "usage: gpuopt --kernel <path> --n <matrix_size> [--fix] [--cost] [--gpu <name>] [--hours <n>]\n";
 }
 
 }  // namespace
@@ -45,6 +48,15 @@ int main(const int argc, const char** argv) {
   std::string kernel_path;
   std::size_t n = 0U;
   bool apply_fix = false;
+  bool cost_mode = false;
+  std::string gpu_name = "a100";
+  double usage_hours = 720.0;
+  const std::unordered_map<std::string, double> gpu_costs = {
+      {"a100", 3.00},
+      {"v100", 2.48},
+      {"t4", 0.35},
+      {"h100", 4.50},
+  };
 
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
@@ -54,6 +66,12 @@ int main(const int argc, const char** argv) {
       n = static_cast<std::size_t>(std::strtoull(argv[++i], nullptr, 10));
     } else if (arg == "--fix") {
       apply_fix = true;
+    } else if (arg == "--cost") {
+      cost_mode = true;
+    } else if (arg == "--gpu" && (i + 1) < argc) {
+      gpu_name = argv[++i];
+    } else if (arg == "--hours" && (i + 1) < argc) {
+      usage_hours = std::strtod(argv[++i], nullptr);
     } else {
       print_usage();
       return EXIT_FAILURE;
@@ -62,6 +80,10 @@ int main(const int argc, const char** argv) {
 
   if (kernel_path.empty() || n == 0U) {
     print_usage();
+    return EXIT_FAILURE;
+  }
+  if (cost_mode && gpu_costs.count(gpu_name) == 0U) {
+    std::cerr << "Unsupported GPU type: " << gpu_name << '\n';
     return EXIT_FAILURE;
   }
 
@@ -214,6 +236,66 @@ int main(const int argc, const char** argv) {
     }
     if (!apply_fix) {
       std::cout << "\n    -> Run with --fix to auto-apply all fixes\n";
+    }
+  }
+
+  if (cost_mode) {
+    std::cout << "\n=== Cost Impact ===\n";
+    if (strided_arrays.empty()) {
+      std::cout << "[✓] No inefficiencies detected — no savings estimate needed\n";
+    } else {
+      std::vector<float> a(n * n, 1.0F);
+      std::vector<float> b(n * n, 1.0F);
+      std::vector<float> out;
+      opengpu::backends::cuda::CUDABackend cuda_backend;
+
+      const auto start = std::chrono::steady_clock::now();
+      const bool run_ok = cuda_backend.run_matmul(a, b, n, &out);
+      const auto end = std::chrono::steady_clock::now();
+      if (!run_ok) {
+        std::cout << "[?] Unable to measure CUDA throughput on this system\n";
+      } else {
+        const double latency_sec = std::chrono::duration<double>(end - start).count();
+        const double flops = 2.0 * static_cast<double>(n) * static_cast<double>(n) * static_cast<double>(n);
+        const double throughput_before = (latency_sec > 0.0) ? (flops / latency_sec) : 0.0;
+
+        const double intensity_before = arithmetic_intensity;
+        const double intensity_after = opengpu::compiler::compute_tiled_intensity(flops, n);
+        const double improvement_ratio =
+            (intensity_before > 0.0) ? (intensity_after / intensity_before) : 1.0;
+        const double throughput_after = throughput_before * improvement_ratio;
+        const double waste_pct =
+            (throughput_after > 0.0) ? (1.0 - (throughput_before / throughput_after)) : 0.0;
+
+        const double gpu_cost = gpu_costs.at(gpu_name);
+        const double monthly_cost = usage_hours * gpu_cost;
+        const double potential_savings = monthly_cost * waste_pct;
+
+        std::string gpu_upper = gpu_name;
+        for (char& ch : gpu_upper) {
+          ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+        }
+
+        std::cout << "GPU              : " << gpu_upper << " ($" << std::fixed << std::setprecision(2)
+                  << gpu_cost << "/hr)\n";
+        std::cout << "Usage            : " << std::fixed << std::setprecision(0) << usage_hours
+                  << " hrs/month\n";
+        std::cout << "Monthly GPU cost : $" << std::fixed << std::setprecision(2) << monthly_cost << "\n\n";
+
+        std::cout << "Before (measured) : " << std::fixed << std::setprecision(0)
+                  << (throughput_before / 1.0e6) << "M ops/s\n";
+        std::cout << "After  (estimated): " << std::fixed << std::setprecision(0)
+                  << (throughput_after / 1.0e6) << "M ops/s\n\n";
+
+        std::cout << "Estimated waste   : " << std::fixed << std::setprecision(1) << (waste_pct * 100.0)
+                  << "%\n";
+        std::cout << "Potential savings : ~$" << std::fixed << std::setprecision(0) << potential_savings
+                  << "/month\n\n";
+
+        std::cout << "Note: After throughput estimated from roofline improvement ratio ("
+                  << std::fixed << std::setprecision(2) << improvement_ratio << "x).\n";
+        std::cout << "      Profile with --fix applied for exact measurement.\n";
+      }
     }
   }
 
