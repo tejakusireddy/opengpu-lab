@@ -48,6 +48,12 @@ struct KernelIR {
   std::vector<Op> ops;
 };
 
+struct DivergenceInfo {
+  bool has_divergence;
+  std::vector<std::string> divergent_conditions;
+  std::vector<std::string> safe_conditions;
+};
+
 /**
  * @brief Builds a naive matmul IR sequence.
  * @param None.

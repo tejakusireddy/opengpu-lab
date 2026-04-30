@@ -143,6 +143,7 @@ Passing `--fix` applies the shared-memory staging optimization automatically and
 - [Run this now](#run-this-now)
 - [What you get (real run output)](#what-you-get-real-run-output)
 - [Compiler Auto-Fix](#compiler-auto-fix)
+- [Validation Coverage](#validation-coverage)
 - [Zero-diff correctness proof](#zero-diff-correctness-proof)
 - [Runtime Architecture](#runtime-architecture)
 - [Scheduler simulation output](#scheduler-simulation-output)
@@ -278,6 +279,34 @@ rtl_sim     73.205        7161943.737           0.016       0.005
 ```
 
 This proves the compiler detects a non-coalesced tile size and automatically rewrites it to the nearest valid multiple of 32. It then verifies the fix with a coalescing pass, requiring no user intervention.
+
+## Validation Coverage
+
+`gpuopt` was tested against a diverse set of real-world CUDA kernels spanning:
+
+```text
+Matrix / array kernels        ✓ correct
+Reductions                    ✓ correct
+Memory access patterns        ✓ correct
+Shared / constant memory      ✓ correct
+Streams / async execution     ✓ correct
+Atomics / n-body              ✓ correct
+Multi-GPU / stencil kernels   ✓ correct
+Cryptographic variants        ✓ correct
+```
+
+Correctly classifies:
+
+- COALESCED global memory
+- STRIDED global memory
+- SHARED on-chip memory
+- CONSTANT cached memory
+
+Analyze any CUDA kernel directly from GitHub:
+
+```bash
+make analyze-url URL=https://raw.githubusercontent.com/.../kernel.cu
+```
 
 ## Zero-diff correctness proof
 

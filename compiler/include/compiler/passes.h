@@ -72,6 +72,19 @@ KernelIR shared_memory_staging_pass(const KernelIR& kernel);
  */
 double compute_tiled_intensity(double flops, std::size_t n);
 
+// Scans kernel source for if statements conditioned on thread ID expressions.
+// Classifies each as DIVERGENT or SAFE.
+//
+// DIVERGENT: condition splits threads within a warp
+//   if (tid % N == 0)     where N < 32
+//   if (tid & mask == 0)  where mask < 32
+//   if (threadIdx.x % N)  where N < 32
+//
+// SAFE: condition splits whole warps, no divergence
+//   if ((tid / 32) % N == 0)
+//   if ((tid / warpSize) % N == 0)
+DivergenceInfo warp_divergence_pass(const std::string& filepath);
+
 }  // namespace opengpu::compiler
 
 #endif  // OPENGPU_LAB_COMPILER_PASSES_H_

@@ -112,6 +112,26 @@ int main(const int argc, const char** argv) {
     }
   }
 
+  const opengpu::compiler::DivergenceInfo divergence =
+      opengpu::compiler::warp_divergence_pass(kernel_path);
+  std::cout << "\n=== Warp Divergence Analysis ===\n";
+  if (!divergence.divergent_conditions.empty()) {
+    for (const std::string& condition : divergence.divergent_conditions) {
+      std::cout << "[!] Potential divergence: " << condition << '\n';
+      std::cout << "    -> Threads may take different paths within warp\n";
+      std::cout << "    -> Consider restructuring to branch on (tid / warpSize)\n";
+    }
+  }
+  if (!divergence.safe_conditions.empty()) {
+    for (const std::string& condition : divergence.safe_conditions) {
+      std::cout << "[✓] Warp-level branch: " << condition << '\n';
+      std::cout << "    -> Entire warps take same path — no divergence\n";
+    }
+  }
+  if (divergence.divergent_conditions.empty() && divergence.safe_conditions.empty()) {
+    std::cout << "[✓] No warp divergence detected\n";
+  }
+
   const double dim = static_cast<double>(n);
   const double flops = 2.0 * dim * dim * dim;
   const double bytes = (2.0 * dim * dim * 4.0) + (dim * dim * 4.0);

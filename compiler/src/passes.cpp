@@ -622,4 +622,133 @@ double compute_tiled_intensity(const double flops, const std::size_t n) {
   return flops / new_bytes;
 }
 
+DivergenceInfo warp_divergence_pass(const std::string& filepath) {
+  DivergenceInfo info{};
+  info.has_divergence = false;
+
+  std::ifstream cuda_file(filepath);
+  if (!cuda_file.is_open()) {
+    return info;
+  }
+
+  auto trim = [](const std::string& value) -> std::string {
+    std::size_t start = 0U;
+    while (start < value.size() && std::isspace(static_cast<unsigned char>(value[start])) != 0) {
+      ++start;
+    }
+    std::size_t end = value.size();
+    while (end > start && std::isspace(static_cast<unsigned char>(value[end - 1U])) != 0) {
+      --end;
+    }
+    return value.substr(start, end - start);
+  };
+
+  auto parse_numeric_literal = [](const std::string& token, std::size_t* out) -> bool {
+    if (token.empty()) {
+      return false;
+    }
+    std::size_t idx = 0U;
+    int base = 10;
+    if (token.size() > 2U && token[0] == '0' && (token[1] == 'x' || token[1] == 'X')) {
+      idx = 2U;
+      base = 16;
+      if (idx >= token.size()) {
+        return false;
+      }
+    }
+    for (std::size_t i = idx; i < token.size(); ++i) {
+      const char ch = token[i];
+      const bool valid = (base == 16) ? (std::isxdigit(static_cast<unsigned char>(ch)) != 0)
+                                      : (std::isdigit(static_cast<unsigned char>(ch)) != 0);
+      if (!valid) {
+        return false;
+      }
+    }
+    *out = static_cast<std::size_t>(std::stoull(token, nullptr, base));
+    return true;
+  };
+
+  auto first_literal_after_op = [&](const std::string& expr, const char op, std::size_t* out) -> bool {
+    std::size_t pos = expr.find(op);
+    while (pos != std::string::npos) {
+      std::size_t cursor = pos + 1U;
+      while (cursor < expr.size() &&
+             (std::isspace(static_cast<unsigned char>(expr[cursor])) != 0 || expr[cursor] == '(')) {
+        ++cursor;
+      }
+      std::size_t end = cursor;
+      while (end < expr.size()) {
+        const char ch = expr[end];
+        const bool token_char = std::isalnum(static_cast<unsigned char>(ch)) != 0 || ch == '_';
+        if (!token_char) {
+          break;
+        }
+        ++end;
+      }
+      if (end > cursor) {
+        const std::string token = expr.substr(cursor, end - cursor);
+        if (parse_numeric_literal(token, out)) {
+          return true;
+        }
+      }
+      pos = expr.find(op, pos + 1U);
+    }
+    return false;
+  };
+
+  std::string line;
+  while (std::getline(cuda_file, line)) {
+    const std::string current = trim(line);
+    const std::size_t if_pos = current.find("if");
+    if (if_pos == std::string::npos || current.find('(', if_pos) == std::string::npos) {
+      continue;
+    }
+    const std::size_t lparen = current.find('(', if_pos);
+    const std::size_t rparen = current.rfind(')');
+    if (rparen == std::string::npos || rparen <= lparen) {
+      continue;
+    }
+    const std::string condition = trim(current.substr(lparen + 1U, rparen - lparen - 1U));
+    const bool has_thread_terms = condition.find("tid") != std::string::npos ||
+                                  condition.find("threadIdx") != std::string::npos ||
+                                  condition.find("idx") != std::string::npos ||
+                                  condition.find("ix") != std::string::npos ||
+                                  condition.find("iy") != std::string::npos;
+    if (!has_thread_terms) {
+      continue;
+    }
+
+    const bool has_warp_safe_hint = condition.find("warpSize") != std::string::npos ||
+                                    condition.find("/ 32") != std::string::npos ||
+                                    condition.find("/32") != std::string::npos;
+    if (has_warp_safe_hint) {
+      info.safe_conditions.push_back("if (" + condition + ")");
+      continue;
+    }
+
+    bool is_divergent = false;
+    std::size_t mod_literal = 0U;
+    if (first_literal_after_op(condition, '%', &mod_literal) && mod_literal < 32U) {
+      is_divergent = true;
+    }
+    std::size_t and_literal = 0U;
+    if (first_literal_after_op(condition, '&', &and_literal) && and_literal < 32U) {
+      is_divergent = true;
+    }
+    if ((condition.find("threadIdx.x %") != std::string::npos || condition.find("tid %") != std::string::npos) &&
+        !has_warp_safe_hint) {
+      if (mod_literal == 0U) {
+        is_divergent = true;
+      }
+    }
+
+    if (is_divergent) {
+      info.divergent_conditions.push_back("if (" + condition + ")");
+    }
+  }
+
+  info.has_divergence = !info.divergent_conditions.empty();
+  return info;
+}
+
 }  // namespace opengpu::compiler
