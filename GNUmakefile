@@ -7,7 +7,7 @@
 N ?= 64
 KERNEL ?= backends/cuda/kernels/matmul.cu
 
-.PHONY: analyze fix benchmark build clean
+.PHONY: analyze fix benchmark analyze-url fix-url build clean
 
 build:
 	@if [ ! -f "./build/tools/gpuopt" ]; then \
@@ -22,6 +22,26 @@ analyze: build
 
 fix: build
 	@./build/tools/gpuopt --kernel $(KERNEL) --n $(N) --fix
+
+analyze-url: build
+	@if [ -z "$(URL)" ]; then \
+		echo "Usage: make analyze-url URL=https://raw.githubusercontent.com/.../kernel.cu [N=64]"; \
+		exit 1; \
+	fi
+	@echo "Downloading kernel from $(URL)..."
+	@curl -s -L -o /tmp/gpuopt_kernel.cu "$(URL)"
+	@./build/tools/gpuopt --kernel /tmp/gpuopt_kernel.cu --n $(N)
+	@rm -f /tmp/gpuopt_kernel.cu
+
+fix-url: build
+	@if [ -z "$(URL)" ]; then \
+		echo "Usage: make fix-url URL=https://raw.githubusercontent.com/.../kernel.cu [N=64]"; \
+		exit 1; \
+	fi
+	@echo "Downloading kernel from $(URL)..."
+	@curl -s -L -o /tmp/gpuopt_kernel.cu "$(URL)"
+	@./build/tools/gpuopt --kernel /tmp/gpuopt_kernel.cu --n $(N) --fix
+	@rm -f /tmp/gpuopt_kernel.cu
 
 benchmark:
 	@if [ ! -f "./build/tests/test_profiler" ]; then \
