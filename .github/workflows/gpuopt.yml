@@ -1,0 +1,64 @@
+name: gpuopt — CUDA Kernel Analysis
+
+on:
+  pull_request:
+    paths:
+      - '**.cu'
+
+permissions:
+  pull-requests: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential verilator iverilog
+
+      - name: Build gpuopt
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --target gpuopt
+
+      - name: Find changed .cu files
+        id: changed
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep '\.cu$' || true)
+          echo "files=$CHANGED" >> $GITHUB_OUTPUT
+
+      - name: Run gpuopt on changed kernels
+        id: analysis
+        run: |
+          REPORT=""
+          for f in ${{ steps.changed.outputs.files }}; do
+            if [ -f "$f" ]; then
+              RESULT=$(./build/tools/gpuopt --kernel "$f" --n 64 2>&1)
+              REPORT="$REPORT\n\n### \`$f\`\n\`\`\`\n$RESULT\n\`\`\`"
+            fi
+          done
+          echo "report<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$REPORT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Post PR comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const report = `${{ steps.analysis.outputs.report }}`;
+            if (!report.trim()) {
+              console.log('No .cu files changed.');
+              return;
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## 🔍 gpuopt — CUDA Kernel Analysis\n\n${report}\n\n---\n*Powered by [gpuopt](https://github.com/tejakusireddy/opengpu-lab)*`
+            });
