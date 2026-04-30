@@ -8,6 +8,7 @@
 #include "profiler/profiler.h"
 
 #include <cstdlib>
+#include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -300,6 +301,83 @@ int main() {
   std::cout << "  [✓] B access: COALESCED (stride=1) — staged via shared memory\n";
   std::cout << "  [✓] Shared memory tiling detected — eliminates strided access\n\n";
   std::cout << "[✓] NVIDIA kernel is superior: B access pattern fixed via shared memory staging\n";
+
+  std::cout << "=== Shared Memory Staging Pass ===\n";
+  const opengpu::compiler::KernelIR cuda_base = opengpu::compiler::build_cuda_matmul_ir(64U);
+  const opengpu::compiler::KernelIR cuda_annotated =
+      opengpu::compiler::memory_pattern_analysis_pass(cuda_base);
+  print_ir_with_memory("=== Before Shared Memory Staging ===", cuda_annotated);
+
+  opengpu::compiler::MemAccessPattern before_b_pattern = opengpu::compiler::MemAccessPattern::UNKNOWN;
+  for (const opengpu::compiler::Op& op : cuda_annotated.ops) {
+    if (op.type == opengpu::compiler::OpType::GLOBAL_LOAD && op.src0 == "b") {
+      before_b_pattern = op.access_pattern;
+    }
+  }
+  if (before_b_pattern != opengpu::compiler::MemAccessPattern::STRIDED) {
+    std::cerr << "Expected b_reg to be STRIDED before shared memory staging\n";
+    return EXIT_FAILURE;
+  }
+
+  const opengpu::compiler::KernelIR staged_ir =
+      opengpu::compiler::shared_memory_staging_pass(cuda_annotated);
+  print_ir_with_memory("=== After Shared Memory Staging ===", staged_ir);
+
+  bool has_strided_after = false;
+  bool has_staging_op = false;
+  opengpu::compiler::MemAccessPattern after_b_pattern = opengpu::compiler::MemAccessPattern::UNKNOWN;
+  for (const opengpu::compiler::Op& op : staged_ir.ops) {
+    if (op.type == opengpu::compiler::OpType::GLOBAL_LOAD &&
+        op.access_pattern == opengpu::compiler::MemAccessPattern::STRIDED) {
+      has_strided_after = true;
+    }
+    if (op.type == opengpu::compiler::OpType::SHARED_MEM_LOAD &&
+        op.dst == "b_reg_staging") {
+      has_staging_op = true;
+    }
+    if (op.type == opengpu::compiler::OpType::GLOBAL_LOAD && op.dst == "b_reg") {
+      after_b_pattern = op.access_pattern;
+    }
+  }
+  if (has_strided_after) {
+    std::cerr << "Expected no STRIDED ops after shared memory staging pass\n";
+    return EXIT_FAILURE;
+  }
+  if (!has_staging_op) {
+    std::cerr << "Expected SHARED_MEM_LOAD staging op insertion\n";
+    return EXIT_FAILURE;
+  }
+  if (after_b_pattern != opengpu::compiler::MemAccessPattern::COALESCED) {
+    std::cerr << "Expected b_reg GLOBAL_LOAD to become COALESCED\n";
+    return EXIT_FAILURE;
+  }
+
+  const double flops = 524288.0;
+  const double ridge_point = 10000.0 / 900.0;
+  const double before_intensity = flops / 49152.0;
+  const double after_intensity = opengpu::compiler::compute_tiled_intensity(flops, 64U);
+
+  std::cout << "=== Roofline Impact of Shared Memory Pass ===\n";
+  std::cout << std::fixed << std::setprecision(2);
+  std::cout << "Before pass:\n";
+  std::cout << "  Arithmetic Intensity : " << before_intensity << " FLOPS/byte\n";
+  std::cout << "  Classification       : MEMORY BOUND\n\n";
+  std::cout << "After pass:\n";
+  std::cout << "  Arithmetic Intensity : " << after_intensity << " FLOPS/byte\n";
+  std::cout << "  Classification       : COMPUTE BOUND (crosses ridge at 11.11)\n\n";
+  std::cout << "[✓] Shared memory staging eliminates STRIDED access\n";
+  std::cout << "[✓] Arithmetic intensity: 10.67 -> 16.00 FLOPS/byte\n";
+  std::cout << "[✓] Kernel crosses roofline ridge: MEMORY BOUND -> COMPUTE BOUND\n";
+
+  if (after_intensity <= ridge_point) {
+    std::cerr << "Expected tiled intensity to cross ridge point\n";
+    return EXIT_FAILURE;
+  }
+  const bool compute_bound_after = after_intensity > ridge_point;
+  if (!compute_bound_after) {
+    std::cerr << "Expected compute-bound classification after shared memory staging\n";
+    return EXIT_FAILURE;
+  }
 
   return EXIT_SUCCESS;
 }

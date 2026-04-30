@@ -55,6 +55,23 @@ KernelIR memory_pattern_analysis_pass(const KernelIR& kernel);
  */
 KernelIR parse_cuda_kernel(const std::string& filepath, std::size_t n);
 
+/**
+ * @brief Rewrites STRIDED global loads to shared-memory staged coalesced loads.
+ * @param kernel Input kernel IR.
+ * @return Rewritten IR with staging ops inserted and global loads updated.
+ * @sideeffects None.
+ */
+KernelIR shared_memory_staging_pass(const KernelIR& kernel);
+
+/**
+ * @brief Computes arithmetic intensity after shared-memory staging.
+ * @param flops Total floating-point operations.
+ * @param n Matrix dimension.
+ * @return New arithmetic intensity in FLOPS/byte.
+ * @sideeffects None.
+ */
+double compute_tiled_intensity(double flops, std::size_t n);
+
 }  // namespace opengpu::compiler
 
 #endif  // OPENGPU_LAB_COMPILER_PASSES_H_

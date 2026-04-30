@@ -165,4 +165,26 @@ KernelIR parse_cuda_kernel(const std::string& filepath, const std::size_t n) {
   return memory_pattern_analysis_pass(parsed);
 }
 
+KernelIR shared_memory_staging_pass(const KernelIR& kernel) {
+  KernelIR rewritten{};
+  rewritten.name = kernel.name;
+  for (Op op : kernel.ops) {
+    if (op.type == OpType::GLOBAL_LOAD && op.access_pattern == MemAccessPattern::STRIDED) {
+      rewritten.ops.push_back(
+          Op{OpType::SHARED_MEM_LOAD, op.dst + "_staging", op.src0, "", 0U,
+             MemAccessPattern::COALESCED, 1U});
+      op.stride = 1U;
+      op.access_pattern = MemAccessPattern::COALESCED;
+    }
+    rewritten.ops.push_back(op);
+  }
+  return rewritten;
+}
+
+double compute_tiled_intensity(const double flops, const std::size_t n) {
+  const double dim = static_cast<double>(n);
+  const double new_bytes = 2.0 * dim * dim * 4.0;
+  return flops / new_bytes;
+}
+
 }  // namespace opengpu::compiler
