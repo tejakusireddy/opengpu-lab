@@ -82,3 +82,4 @@ bool launch_naive_matmul(const float* a_device, const float* b_device, float* c_
 }
 
 }  // namespace opengpu::backends::cuda::kernels
+// test
