@@ -5,6 +5,10 @@
 ![Verilog](https://img.shields.io/badge/RTL-Verilog-orange)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
+> Analyze any CUDA kernel, auto-fix performance issues, and verify execution across CPU, CUDA, and RTL — in one command.
+
+Tested on real-world CUDA kernels, including naive matmul, transpose, and NVIDIA samples.
+
 ## Quick Start
 ```bash
 git clone https://github.com/tejakusireddy/opengpu-lab
@@ -13,14 +17,29 @@ make analyze KERNEL=backends/cuda/kernels/matmul.cu
 ```
 
 ```bash
-make analyze KERNEL=your_kernel.cu   # analyze any CUDA file
-make fix KERNEL=your_kernel.cu       # detect + auto-fix
-make benchmark                        # CPU vs CUDA vs RTL performance
+make benchmark                  # CPU + CUDA + RTL (matmul only)
+make analyze KERNEL=any.cu      # works on any CUDA file
+make fix KERNEL=any.cu          # applies supported safe fixes when patterns match
+make analyze-url URL=https://raw.githubusercontent.com/.../kernel.cu
+make fix-url URL=https://raw.githubusercontent.com/.../kernel.cu
 ```
 
-> Run the same workload on CPU, CUDA, and RTL — then see exactly where your GPU performance is being wasted.
+No setup required beyond build — works on any CUDA file or URL.
+Tip: Try `make analyze-url URL=<raw .cu file>` to analyze kernels directly from GitHub.
 
-OpenGPU Lab is an open-source GPU systems lab for understanding and optimizing how workloads move from software runtime to hardware execution.
+These URL targets download and analyze any .cu file directly from a URL — no manual download needed.
+
+Note: make benchmark runs all three backends (CPU, CUDA, RTL-sim) 
+and verifies correctness across all of them. This requires a matching 
+implementation in all backends and currently supports the included 
+matmul kernel only.
+
+make analyze and make fix work on any .cu file — they perform static 
+analysis on the source code without executing it.
+
+> Compare the same workload across CPU, CUDA, and RTL to pinpoint exactly where GPU performance is being lost.
+
+OpenGPU Lab is an open-source GPU optimization and execution platform for analyzing, fixing, and validating GPU workloads end-to-end.
 
 It provides one C++ dispatch API with multiple execution backends:
 
@@ -35,7 +54,7 @@ The goal is simple: run the same workload across CPU, CUDA, and RTL-sim, compare
 
 **Fully open-source (MIT License). Built for learning, experimentation, and real GPU performance analysis.**
 
-## gpuopt — CLI Tool
+## gpuopt — GPU Optimization CLI
 
 `gpuopt` analyzes a CUDA kernel file end-to-end and reports memory access issues, roofline classification, and optimization guidance in one command.
 
@@ -114,7 +133,7 @@ Passing `--fix` applies the shared-memory staging optimization automatically and
 
 ## Table of contents
 
-- [gpuopt — CLI Tool](#gpuopt--cli-tool)
+- [gpuopt — GPU Optimization CLI](#gpuopt--gpu-optimization-cli)
 - [Quick start](#quick-start)
 - [Prerequisites](#prerequisites)
 - [Install (one-time)](#install-one-time)
@@ -123,22 +142,15 @@ Passing `--fix` applies the shared-memory staging optimization automatically and
 - [Who this is for](#who-this-is-for)
 - [Run this now](#run-this-now)
 - [What you get (real run output)](#what-you-get-real-run-output)
+- [Compiler Auto-Fix](#compiler-auto-fix)
 - [Zero-diff correctness proof](#zero-diff-correctness-proof)
-- [Architecture](#architecture)
-- [Build and run](#build-and-run)
+- [Runtime Architecture](#runtime-architecture)
 - [Scheduler simulation output](#scheduler-simulation-output)
 - [RTL accelerator](#rtl-accelerator)
+- [RTL Validation](#rtl-validation)
 - [Project layout](#project-layout)
 - [What this is / what this is not](#what-this-is--what-this-is-not)
 - [Roadmap](#roadmap)
-
-## Quick start
-
-```bash
-cmake -S opengpu-lab -B opengpu-lab/build && cmake --build opengpu-lab/build && ctest --test-dir opengpu-lab/build -V
-```
-
-> Works without CUDA (CPU/RTL only). The CUDA backend has a host fallback when CUDA is unavailable.
 
 ## Prerequisites
 
@@ -150,7 +162,7 @@ cmake -S opengpu-lab -B opengpu-lab/build && cmake --build opengpu-lab/build && 
 ## Install (one-time)
 
 ```bash
-git clone <repo>
+git clone https://github.com/tejakusireddy/opengpu-lab
 cd opengpu-lab
 cmake -S . -B build && cmake --build build
 ```
@@ -228,7 +240,7 @@ vvp rtl/sim/tb_matmul
 Real output from `ctest -V` (`test_profiler` section):
 
 ```text
-=== Performance Report ===
+=== OpenGPU Benchmark ===
 Backend     Latency(ms)   Throughput(ops/s)     Occupancy   Stall
 cpu         1.026         511230159.272         0.016       0.005
 cuda        1.011         518711847.638         0.016       0.005
@@ -299,7 +311,7 @@ idx=15 rtl=386.000000 cpu=386.000000 diff=0.000000
 max diff: 0.000000
 ```
 
-## Architecture
+## Runtime Architecture
 
 ```mermaid
 graph TD
@@ -312,17 +324,6 @@ graph TD
     E --> H[Profiler + Metrics + Insights]
     F --> H
     G --> H
-```
-
-## Build and run
-
-From repo root:
-
-```bash
-cmake -S opengpu-lab -B opengpu-lab/build
-cmake --build opengpu-lab/build
-cd opengpu-lab/build
-ctest -V
 ```
 
 ## Scheduler simulation output
