@@ -37,6 +37,22 @@ void tick(Vmatmul_accelerator* model) {
 }
 
 /**
+ * @brief Builds deterministic non-zero matrix data for harness validation.
+ * @param n Matrix dimension.
+ * @param seed Value offset.
+ * @return Row-major matrix values.
+ * @sideeffects None.
+ */
+std::vector<float> make_matrix(const std::size_t n, const std::size_t seed) {
+  std::vector<float> out(n * n, 0.0F);
+  constexpr std::size_t kValueMod = 17U;
+  for (std::size_t i = 0; i < out.size(); ++i) {
+    out[i] = static_cast<float>(((i + seed) % kValueMod) + 1U);
+  }
+  return out;
+}
+
+/**
  * @brief Executes one 4x4 matrix multiply on the Verilated model.
  * @param a_tile Row-major 4x4 tile A.
  * @param b_tile Row-major 4x4 tile B.
@@ -129,5 +145,79 @@ std::vector<float> VerilatorHarness::run_matmul(const std::vector<float>& a,
   }
   return output;
 }
+
+bool VerilatorHarness::verify_reset_clears_output(const std::size_t n) {
+  if (n != kModelDim) {
+    return false;
+  }
+
+  const std::vector<float> a = make_matrix(n, 3U);
+  const std::vector<float> b = make_matrix(n, 9U);
+  std::unique_ptr<Vmatmul_accelerator> model = std::make_unique<Vmatmul_accelerator>();
+
+  model->start = 0U;
+  model->rst = 0U;
+  for (std::size_t idx = 0; idx < kElemCount; ++idx) {
+    model->a_flat[idx] = static_cast<std::uint32_t>(a[idx]);
+    model->b_flat[idx] = static_cast<std::uint32_t>(b[idx]);
+    model->c_flat[idx] = 0xFFFFFFFFU;
+  }
+
+  model->rst = 1U;
+  tick(model.get());
+  tick(model.get());
+  model->rst = 0U;
+  tick(model.get());
+
+  for (std::size_t idx = 0; idx < kElemCount; ++idx) {
+    if (model->c_flat[idx] != 0U) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool VerilatorHarness::verify_done_on_correct_cycle(const std::size_t n) {
+  if (n != kModelDim) {
+    last_done_cycle_ = 0U;
+    return false;
+  }
+
+  const std::vector<float> a = make_matrix(n, 5U);
+  const std::vector<float> b = make_matrix(n, 11U);
+  std::unique_ptr<Vmatmul_accelerator> model = std::make_unique<Vmatmul_accelerator>();
+
+  model->start = 0U;
+  model->rst = 1U;
+  tick(model.get());
+  tick(model.get());
+  model->rst = 0U;
+
+  for (std::size_t idx = 0; idx < kElemCount; ++idx) {
+    model->a_flat[idx] = static_cast<std::uint32_t>(a[idx]);
+    model->b_flat[idx] = static_cast<std::uint32_t>(b[idx]);
+  }
+
+  model->start = 1U;
+  tick(model.get());
+  model->start = 0U;
+
+  const std::size_t cycle_bound = (n * n * n) + 2U;
+  last_done_cycle_ = 0U;
+  for (std::size_t cycle = 1U; cycle <= kMaxSimulationCycles; ++cycle) {
+    tick(model.get());
+    if (model->done != 0U) {
+      last_done_cycle_ = cycle;
+      break;
+    }
+  }
+
+  if (last_done_cycle_ == 0U) {
+    return false;
+  }
+  return last_done_cycle_ <= cycle_bound;
+}
+
+std::size_t VerilatorHarness::last_done_cycle() const { return last_done_cycle_; }
 
 }  // namespace opengpu::verilator

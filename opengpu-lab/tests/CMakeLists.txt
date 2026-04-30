@@ -29,6 +29,10 @@ add_executable(test_rtl_sim test_rtl_sim.cpp)
 target_link_libraries(test_rtl_sim PRIVATE backend_cpu backend_rtl_sim runtime)
 add_test(NAME test_rtl_sim COMMAND test_rtl_sim)
 
+add_executable(test_rtl_validation test_rtl_validation.cpp)
+target_link_libraries(test_rtl_validation PRIVATE verilator_harness)
+add_test(NAME test_rtl_validation COMMAND test_rtl_validation)
+
 add_executable(test_profiler test_profiler.cpp)
 target_include_directories(test_profiler PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../backends/cpu/kernels
