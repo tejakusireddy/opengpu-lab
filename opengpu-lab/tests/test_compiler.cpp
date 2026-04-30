@@ -214,5 +214,48 @@ int main() {
   std::cout << "[!] b access: STRIDED (stride=64) — non-coalesced column access\n";
   std::cout << "[✓] c access: COALESCED (stride=1)\n";
 
+  std::cout << "=== CUDA Kernel Parser (matmul.cu) ===\n";
+  const opengpu::compiler::KernelIR parsed_ir =
+      opengpu::compiler::parse_cuda_kernel(CUDA_KERNEL_PATH, 64U);
+  print_ir_with_memory("=== Parsed CUDA Kernel IR ===", parsed_ir);
+
+  opengpu::compiler::MemAccessPattern parsed_a = opengpu::compiler::MemAccessPattern::UNKNOWN;
+  std::size_t parsed_a_stride = 0U;
+  opengpu::compiler::MemAccessPattern parsed_b = opengpu::compiler::MemAccessPattern::UNKNOWN;
+  std::size_t parsed_b_stride = 0U;
+  opengpu::compiler::MemAccessPattern parsed_c = opengpu::compiler::MemAccessPattern::UNKNOWN;
+  std::size_t parsed_c_stride = 0U;
+
+  for (const opengpu::compiler::Op& op : parsed_ir.ops) {
+    if (op.type == opengpu::compiler::OpType::GLOBAL_LOAD && op.src0 == "a_device") {
+      parsed_a = op.access_pattern;
+      parsed_a_stride = op.stride;
+    } else if (op.type == opengpu::compiler::OpType::GLOBAL_LOAD && op.src0 == "b_device") {
+      parsed_b = op.access_pattern;
+      parsed_b_stride = op.stride;
+    } else if (op.type == opengpu::compiler::OpType::GLOBAL_STORE && op.dst == "c_device") {
+      parsed_c = op.access_pattern;
+      parsed_c_stride = op.stride;
+    }
+  }
+
+  if (parsed_a != opengpu::compiler::MemAccessPattern::COALESCED || parsed_a_stride != 1U) {
+    std::cerr << "Parser failed to classify a_device as COALESCED stride=1\n";
+    return EXIT_FAILURE;
+  }
+  if (parsed_b != opengpu::compiler::MemAccessPattern::STRIDED || parsed_b_stride != 64U) {
+    std::cerr << "Parser failed to classify b_device as STRIDED stride=64\n";
+    return EXIT_FAILURE;
+  }
+  if (parsed_c != opengpu::compiler::MemAccessPattern::COALESCED || parsed_c_stride != 1U) {
+    std::cerr << "Parser failed to classify c_device as COALESCED stride=1\n";
+    return EXIT_FAILURE;
+  }
+
+  std::cout << "[✓] Parser detected: a_device -> COALESCED (stride=1)\n";
+  std::cout << "[!] Parser detected: b_device -> STRIDED (stride=64) — column access\n";
+  std::cout << "[✓] Parser detected: c_device -> COALESCED (stride=1)\n";
+  std::cout << "[✓] CUDA kernel analysis complete\n";
+
   return EXIT_SUCCESS;
 }

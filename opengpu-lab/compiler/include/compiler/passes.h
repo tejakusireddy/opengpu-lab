@@ -7,6 +7,7 @@
 #define OPENGPU_LAB_COMPILER_PASSES_H_
 
 #include <cstddef>
+#include <string>
 
 #include "compiler/ir.h"
 
@@ -44,6 +45,15 @@ KernelIR auto_coalescing_fix_pass(const KernelIR& kernel);
  * @sideeffects None.
  */
 KernelIR memory_pattern_analysis_pass(const KernelIR& kernel);
+
+/**
+ * @brief Parses CUDA kernel source and builds memory-pattern-annotated IR.
+ * @param filepath Path to .cu source file.
+ * @param n Matrix dimension used for strided access inference.
+ * @return Parsed and annotated KernelIR for global load/store operations.
+ * @sideeffects Reads kernel source file from disk.
+ */
+KernelIR parse_cuda_kernel(const std::string& filepath, std::size_t n);
 
 }  // namespace opengpu::compiler
 

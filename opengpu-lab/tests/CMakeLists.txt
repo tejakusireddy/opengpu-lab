@@ -52,6 +52,9 @@ target_link_libraries(test_compiler PRIVATE
   compiler
   profiler
 )
+target_compile_definitions(test_compiler PRIVATE
+  CUDA_KERNEL_PATH="${CMAKE_SOURCE_DIR}/backends/cuda/kernels/matmul.cu"
+)
 add_test(NAME test_compiler COMMAND test_compiler)
 
 add_executable(test_golden test_golden.cpp)
