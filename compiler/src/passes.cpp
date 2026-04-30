@@ -61,6 +61,10 @@ KernelIR memory_pattern_analysis_pass(const KernelIR& kernel) {
   KernelIR annotated = kernel;
   for (Op& op : annotated.ops) {
     if (op.type == OpType::GLOBAL_LOAD || op.type == OpType::GLOBAL_STORE) {
+      if (op.access_pattern == MemAccessPattern::CONSTANT_MEM ||
+          op.access_pattern == MemAccessPattern::SHARED_MEM) {
+        continue;
+      }
       if (op.stride == 1U) {
         op.access_pattern = MemAccessPattern::COALESCED;
       } else if (op.stride > 1U) {
@@ -97,6 +101,18 @@ KernelIR parse_cuda_kernel(const std::string& filepath, const std::size_t n) {
     return value.substr(start, end - start);
   };
 
+  auto is_positive_integer = [](const std::string& value) -> bool {
+    if (value.empty()) {
+      return false;
+    }
+    for (const char ch : value) {
+      if (std::isdigit(static_cast<unsigned char>(ch)) == 0) {
+        return false;
+      }
+    }
+    return true;
+  };
+
   auto extract_lhs_var = [&](const std::string& full_line) -> std::string {
     const std::size_t eq_pos = full_line.find('=');
     if (eq_pos == std::string::npos) {
@@ -116,6 +132,32 @@ KernelIR parse_cuda_kernel(const std::string& filepath, const std::size_t n) {
       --end;
     }
     return lhs.substr(end);
+  };
+
+  auto extract_declared_array_name = [&](const std::string& full_line, const std::string& keyword) -> std::string {
+    const std::string line_trimmed = trim(full_line);
+    const std::size_t keyword_pos = line_trimmed.find(keyword);
+    if (keyword_pos == std::string::npos) {
+      return "";
+    }
+    const std::size_t after_keyword = keyword_pos + keyword.size();
+    const std::size_t name_end = line_trimmed.find('[', after_keyword);
+    if (name_end == std::string::npos) {
+      return "";
+    }
+    std::size_t name_start = name_end;
+    while (name_start > after_keyword) {
+      const char ch = line_trimmed[name_start - 1U];
+      const bool is_ident = std::isalnum(static_cast<unsigned char>(ch)) != 0 || ch == '_';
+      if (!is_ident) {
+        break;
+      }
+      --name_start;
+    }
+    if (name_start >= name_end) {
+      return "";
+    }
+    return line_trimmed.substr(name_start, name_end - name_start);
   };
 
   auto collect_array_accesses =
@@ -150,24 +192,25 @@ KernelIR parse_cuda_kernel(const std::string& filepath, const std::size_t n) {
   };
 
   auto in_kernel_body = [](const std::vector<std::string>& all_lines, const std::size_t idx) -> bool {
-    bool saw_global = false;
+    bool saw_gpu_fn = false;
     int brace_depth = 0;
     bool inside = false;
     for (std::size_t i = 0U; i <= idx && i < all_lines.size(); ++i) {
       const std::string& current = all_lines[i];
-      if (!saw_global && current.find("__global__") != std::string::npos) {
-        saw_global = true;
+      if (!saw_gpu_fn &&
+          (current.find("__global__") != std::string::npos || current.find("__device__") != std::string::npos)) {
+        saw_gpu_fn = true;
       }
       for (char ch : current) {
         if (ch == '{') {
           ++brace_depth;
-          if (saw_global && brace_depth >= 1) {
+          if (saw_gpu_fn && brace_depth >= 1) {
             inside = true;
           }
         } else if (ch == '}') {
           if (inside && brace_depth == 1) {
             inside = false;
-            saw_global = false;
+            saw_gpu_fn = false;
           }
           if (brace_depth > 0) {
             --brace_depth;
@@ -184,8 +227,60 @@ KernelIR parse_cuda_kernel(const std::string& filepath, const std::size_t n) {
   bool legacy_mode = false;
   std::unordered_map<std::string, MemAccessPattern> index_map;
   std::unordered_map<std::string, std::size_t> stride_map;
-  std::unordered_map<std::string, bool> shared_arrays;
+  std::unordered_map<std::string, std::size_t> constants;
+  std::unordered_set<std::string> constant_arrays;
+  std::unordered_set<std::string> shared_arrays;
   std::unordered_set<std::string> seen_arrays;
+
+  // Pass 0: resolve #define constants and memory-space declarations.
+  for (const std::string& raw_line : lines) {
+    const std::string current = trim(raw_line);
+    if (current.find("__constant__") != std::string::npos) {
+      const std::string name = extract_declared_array_name(current, "__constant__");
+      if (!name.empty()) {
+        constant_arrays.insert(name);
+      }
+    }
+    if (current.find("__shared__") != std::string::npos) {
+      const std::string name = extract_declared_array_name(current, "__shared__");
+      if (!name.empty()) {
+        shared_arrays.insert(name);
+      }
+    }
+    if (current.rfind("#define", 0U) != 0U) {
+      continue;
+    }
+    const std::size_t first_space = current.find_first_of(" \t");
+    if (first_space == std::string::npos) {
+      continue;
+    }
+    const std::size_t name_start = current.find_first_not_of(" \t", first_space);
+    if (name_start == std::string::npos) {
+      continue;
+    }
+    const std::size_t name_end = current.find_first_of(" \t", name_start);
+    const std::string name =
+        current.substr(name_start, (name_end == std::string::npos) ? std::string::npos : (name_end - name_start));
+    if (name.empty() || name.find('(') != std::string::npos) {
+      continue;
+    }
+    if (name_end == std::string::npos) {
+      continue;
+    }
+    const std::size_t value_start = current.find_first_not_of(" \t", name_end);
+    if (value_start == std::string::npos) {
+      continue;
+    }
+    std::size_t value_end = current.find_first_of(" \t", value_start);
+    if (value_end == std::string::npos) {
+      value_end = current.size();
+    }
+    const std::string value = current.substr(value_start, value_end - value_start);
+    if (!is_positive_integer(value)) {
+      continue;
+    }
+    constants[name] = static_cast<std::size_t>(std::stoull(value));
+  }
 
   // Pass 1: index variable analysis.
   for (std::size_t line_idx = 0U; line_idx < lines.size(); ++line_idx) {
@@ -210,13 +305,21 @@ KernelIR parse_cuda_kernel(const std::string& filepath, const std::size_t n) {
 
     const bool has_thread_x = expr.find("threadIdx.x") != std::string::npos;
     const bool has_thread_y = expr.find("threadIdx.y") != std::string::npos;
+    std::size_t constant_stride = 0U;
+    for (const auto& [name, value] : constants) {
+      if (expr.find(name + " *") != std::string::npos || expr.find(name + "*") != std::string::npos ||
+          expr.find("* " + name) != std::string::npos || expr.find("*" + name) != std::string::npos) {
+        constant_stride = value;
+        break;
+      }
+    }
     const bool has_block_terms =
         expr.find("blockIdx.") != std::string::npos || expr.find("blockDim.") != std::string::npos;
     const bool has_multiplier = expr.find('*') != std::string::npos;
     const bool has_dim_multiplier = expr.find("width") != std::string::npos ||
                                     expr.find("height") != std::string::npos ||
                                     expr.find(" n") != std::string::npos ||
-                                    expr.find("*n") != std::string::npos;
+                                    expr.find("*n") != std::string::npos || constant_stride > 0U;
     const bool has_coalesced_form =
         (has_thread_x || has_thread_y) &&
         (expr.find("blockIdx.x * blockDim.x + threadIdx.x") != std::string::npos ||
@@ -249,7 +352,7 @@ KernelIR parse_cuda_kernel(const std::string& filepath, const std::size_t n) {
     if ((has_multiplier && has_dim_multiplier) || (has_multiplier && ends_with_x_index) ||
         strided_from_known_term) {
       index_map[var_name] = MemAccessPattern::STRIDED;
-      stride_map[var_name] = n;
+      stride_map[var_name] = constant_stride > 0U ? constant_stride : n;
       continue;
     }
 
@@ -321,20 +424,10 @@ KernelIR parse_cuda_kernel(const std::string& filepath, const std::size_t n) {
     }
 
     if (current.find("__shared__") != std::string::npos) {
-      const std::string marker = "float ";
-      const std::size_t type_pos = current.find(marker);
-      const std::size_t bracket_pos =
-          current.find("[", type_pos == std::string::npos ? 0U : type_pos);
-      if (type_pos != std::string::npos && bracket_pos != std::string::npos &&
-          bracket_pos > (type_pos + marker.size())) {
-        const std::string name =
-            current.substr(type_pos + marker.size(), bracket_pos - (type_pos + marker.size()));
-        shared_arrays[name] = true;
-        if (seen_arrays.insert(name).second) {
-          parsed.ops.push_back(
-              Op{OpType::SHARED_MEM_LOAD, name, "shared_decl", "", 0U, MemAccessPattern::COALESCED,
-                 1U});
-        }
+      const std::string name = extract_declared_array_name(current, "__shared__");
+      if (!name.empty() && seen_arrays.insert(name).second) {
+        parsed.ops.push_back(
+            Op{OpType::SHARED_MEM_LOAD, name, "shared_decl", "", 0U, MemAccessPattern::SHARED_MEM, 1U});
       }
     }
 
@@ -359,6 +452,12 @@ KernelIR parse_cuda_kernel(const std::string& filepath, const std::size_t n) {
       if (index_map.count(index) > 0U) {
         return {index_map[index], stride_map[index]};
       }
+      for (const auto& [name, value] : constants) {
+        if (index.find(name + " *") != std::string::npos || index.find(name + "*") != std::string::npos ||
+            index.find("* " + name) != std::string::npos || index.find("*" + name) != std::string::npos) {
+          return {MemAccessPattern::STRIDED, value};
+        }
+      }
       if (index.find("threadIdx.x") != std::string::npos || index == "id" ||
           (!index.empty() && index.back() == 'x')) {
         return {MemAccessPattern::COALESCED, 1U};
@@ -368,10 +467,17 @@ KernelIR parse_cuda_kernel(const std::string& filepath, const std::size_t n) {
 
     if (!legacy_mode) {
       for (const auto& access : lhs_accesses) {
-        if (shared_arrays.count(access.first) > 0U) {
+        if (!seen_arrays.insert(access.first).second) {
           continue;
         }
-        if (!seen_arrays.insert(access.first).second) {
+        if (constant_arrays.count(access.first) > 0U) {
+          parsed.ops.push_back(
+              Op{OpType::GLOBAL_STORE, access.first, access.first, "", 0U, MemAccessPattern::CONSTANT_MEM, 1U});
+          continue;
+        }
+        if (shared_arrays.count(access.first) > 0U) {
+          parsed.ops.push_back(
+              Op{OpType::SHARED_MEM_STORE, access.first, access.first, "", 0U, MemAccessPattern::SHARED_MEM, 1U});
           continue;
         }
         const auto [pattern, stride] = classify_index(access.second);
@@ -379,10 +485,17 @@ KernelIR parse_cuda_kernel(const std::string& filepath, const std::size_t n) {
             Op{OpType::GLOBAL_STORE, access.first, access.first, "", 0U, pattern, stride});
       }
       for (const auto& access : rhs_accesses) {
-        if (shared_arrays.count(access.first) > 0U) {
+        if (!seen_arrays.insert(access.first).second) {
           continue;
         }
-        if (!seen_arrays.insert(access.first).second) {
+        if (constant_arrays.count(access.first) > 0U) {
+          parsed.ops.push_back(Op{OpType::GLOBAL_LOAD, access.first + "_load", access.first, "", 0U,
+                                  MemAccessPattern::CONSTANT_MEM, 1U});
+          continue;
+        }
+        if (shared_arrays.count(access.first) > 0U) {
+          parsed.ops.push_back(Op{OpType::SHARED_MEM_LOAD, access.first + "_load", access.first, "", 0U,
+                                  MemAccessPattern::SHARED_MEM, 1U});
           continue;
         }
         const auto [pattern, stride] = classify_index(access.second);

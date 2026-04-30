@@ -27,6 +27,10 @@ const char* pattern_name(const opengpu::compiler::MemAccessPattern pattern) {
       return "RANDOM";
     case opengpu::compiler::MemAccessPattern::UNKNOWN:
       return "UNKNOWN";
+    case opengpu::compiler::MemAccessPattern::CONSTANT_MEM:
+      return "CONSTANT (cached, broadcast)";
+    case opengpu::compiler::MemAccessPattern::SHARED_MEM:
+      return "SHARED (on-chip, no coalescing needed)";
   }
   return "UNKNOWN";
 }
@@ -78,22 +82,32 @@ int main(const int argc, const char** argv) {
   std::vector<std::string> strided_arrays;
   for (const opengpu::compiler::Op& op : analyzed.ops) {
     if (op.type != opengpu::compiler::OpType::GLOBAL_LOAD &&
-        op.type != opengpu::compiler::OpType::GLOBAL_STORE) {
+        op.type != opengpu::compiler::OpType::GLOBAL_STORE &&
+        op.type != opengpu::compiler::OpType::SHARED_MEM_LOAD &&
+        op.type != opengpu::compiler::OpType::SHARED_MEM_STORE) {
       continue;
     }
     const std::string symbol = op.src0.empty() ? op.dst : op.src0;
+    const std::string display_symbol =
+        (op.access_pattern == opengpu::compiler::MemAccessPattern::SHARED_MEM && op.src0 == "shared_decl")
+            ? op.dst
+            : symbol;
     if (op.access_pattern == opengpu::compiler::MemAccessPattern::STRIDED) {
-      strided_arrays.push_back(symbol);
-      std::cout << "[!] " << symbol << " -> " << pattern_name(op.access_pattern) << " (stride="
+      strided_arrays.push_back(display_symbol);
+      std::cout << "[!] " << display_symbol << " -> " << pattern_name(op.access_pattern) << " (stride="
                 << op.stride << ") — non-coalesced column access\n";
       ++issue_count;
       ++fixable_count;
     } else {
-      const char* status = "[✓] ";
-      if (op.access_pattern == opengpu::compiler::MemAccessPattern::UNKNOWN) {
-        status = "[?] ";
+      const char* status = "[?] ";
+      if (op.access_pattern == opengpu::compiler::MemAccessPattern::COALESCED) {
+        status = "[✓] ";
+      } else if (op.access_pattern == opengpu::compiler::MemAccessPattern::CONSTANT_MEM) {
+        status = "[✓] ";
+      } else if (op.access_pattern == opengpu::compiler::MemAccessPattern::SHARED_MEM) {
+        status = "[✓] ";
       }
-      std::cout << status << symbol << " -> " << pattern_name(op.access_pattern) << " (stride="
+      std::cout << status << display_symbol << " -> " << pattern_name(op.access_pattern) << " (stride="
                 << op.stride << ")\n";
     }
   }

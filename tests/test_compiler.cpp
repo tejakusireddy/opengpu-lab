@@ -61,6 +61,10 @@ const char* access_pattern_name(const opengpu::compiler::MemAccessPattern patter
       return "RANDOM";
     case opengpu::compiler::MemAccessPattern::UNKNOWN:
       return "UNKNOWN";
+    case opengpu::compiler::MemAccessPattern::CONSTANT_MEM:
+      return "CONSTANT_MEM";
+    case opengpu::compiler::MemAccessPattern::SHARED_MEM:
+      return "SHARED_MEM";
   }
   return "UNKNOWN";
 }

@@ -12,7 +12,14 @@
 
 namespace opengpu::compiler {
 
-enum class MemAccessPattern { COALESCED, STRIDED, RANDOM, UNKNOWN };
+enum class MemAccessPattern {
+  COALESCED,
+  STRIDED,
+  RANDOM,
+  UNKNOWN,
+  CONSTANT_MEM,
+  SHARED_MEM
+};
 
 enum class OpType {
   LOAD,
