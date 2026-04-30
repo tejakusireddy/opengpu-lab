@@ -65,7 +65,17 @@ target_link_libraries(test_compiler PRIVATE
   compiler
   profiler
 )
-file(COPY /tmp/matrixMul.cu DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/samples/)
+set(MATRIXMUL_URL "https://raw.githubusercontent.com/NVIDIA/cuda-samples/master/Samples/0_Introduction/matrixMul/matrixMul.cu")
+set(MATRIXMUL_DST "${CMAKE_CURRENT_BINARY_DIR}/samples/matrixMul.cu")
+
+if(NOT EXISTS "${MATRIXMUL_DST}")
+  file(DOWNLOAD "${MATRIXMUL_URL}" "${MATRIXMUL_DST}"
+       STATUS DOWNLOAD_STATUS)
+  list(GET DOWNLOAD_STATUS 0 STATUS_CODE)
+  if(NOT STATUS_CODE EQUAL 0)
+    message(WARNING "Could not download matrixMul.cu — skipping NVIDIA sample test")
+  endif()
+endif()
 target_compile_definitions(test_compiler PRIVATE
   CUDA_KERNEL_PATH="${CMAKE_SOURCE_DIR}/backends/cuda/kernels/matmul.cu"
   NVIDIA_KERNEL_PATH="${CMAKE_CURRENT_BINARY_DIR}/samples/matrixMul.cu"
